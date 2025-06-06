@@ -1,103 +1,203 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react'
+import { format } from 'date-fns'
+import { 
+  Plus, 
+  Smartphone, 
+  TrendingUp, 
+  Calendar, 
+  DollarSign,
+  RefreshCw,
+  Download,
+  Settings
+} from 'lucide-react'
+
+import ExpenseForm from './components/ExpenseForm'
+import ExpenseList from './components/ExpenseList'
+import Summary from './components/Summary'
+import InstallPrompt from './components/InstallPrompt'
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [expenses, setExpenses] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState('disconnected')
+  const [sheetConfig, setSheetConfig] = useState({
+    sheetId: '',
+    apiUrl: ''
+  })
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    loadExpenses()
+    
+    // Check for install action from shortcut
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('action') === 'add') {
+      setShowForm(true)
+    }
+  }, [])
+
+  const loadExpenses = async () => {
+    try {
+      const stored = localStorage.getItem('expenses')
+      if (stored) {
+        setExpenses(JSON.parse(stored))
+      }
+      
+      const config = localStorage.getItem('sheetConfig')
+      if (config) {
+        setSheetConfig(JSON.parse(config))
+        setConnectionStatus('connected')
+      }
+    } catch (error) {
+      console.error('Error loading expenses:', error)
+    }
+  }
+
+  const addExpense = async (expense) => {
+    try {
+      setIsLoading(true)
+      const newExpense = {
+        ...expense,
+        id: Date.now(),
+        timestamp: new Date().toISOString()
+      }
+
+      const updatedExpenses = [newExpense, ...expenses]
+      setExpenses(updatedExpenses)
+      localStorage.setItem('expenses', JSON.stringify(updatedExpenses))
+
+      // Sync to Google Sheets if connected
+      if (connectionStatus === 'connected' && sheetConfig.apiUrl) {
+        await syncToGoogleSheets(newExpense)
+      }
+
+      setShowForm(false)
+    } catch (error) {
+      console.error('Error adding expense:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const syncToGoogleSheets = async (expense) => {
+    try {
+      const response = await fetch(sheetConfig.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(expense)
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to sync to Google Sheets')
+      }
+    } catch (error) {
+      console.error('Sync error:', error)
+      // Store for later sync
+      const pendingSync = JSON.parse(localStorage.getItem('pendingSync') || '[]')
+      pendingSync.push(expense)
+      localStorage.setItem('pendingSync', JSON.stringify(pendingSync))
+    }
+  }
+
+  const refreshFromSheets = async () => {
+    if (connectionStatus !== 'connected' || !sheetConfig.apiUrl) return
+
+    try {
+      setIsLoading(true)
+      const response = await fetch(sheetConfig.apiUrl)
+      const data = await response.json()
+      
+      setExpenses(data)
+      localStorage.setItem('expenses', JSON.stringify(data))
+    } catch (error) {
+      console.error('Error refreshing from sheets:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen ios-safe-top ios-safe-bottom">
+      <InstallPrompt />
+      
+      {/* Header */}
+      <header className="glass sticky top-0 z-50 p-4 m-4 rounded-xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gradient-to-r from-green-500 to-green-600 rounded-lg">
+              <DollarSign className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-800">Expense Tracker</h1>
+              <p className="text-sm text-gray-600">
+                {connectionStatus === 'connected' ? '🟢 Synced' : '🔴 Offline'}
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex space-x-2">
+            <button
+              onClick={refreshFromSheets}
+              disabled={isLoading || connectionStatus !== 'connected'}
+              className="p-2 bg-blue-500 text-white rounded-lg disabled:opacity-50"
+            >
+              <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            
+            <button
+              onClick={() => setShowForm(true)}
+              className="p-2 bg-green-500 text-white rounded-lg"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </header>
+
+      {/* Summary Cards */}
+      <Summary expenses={expenses} />
+
+      {/* Quick Add Button - Mobile First */}
+      {!showForm && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <button
+            onClick={() => setShowForm(true)}
+            className="w-16 h-16 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full shadow-lg hover:shadow-xl transform transition-all duration-200 hover:scale-110 active:scale-95 flex items-center justify-center"
+          >
+            <Plus className="w-8 h-8" />
+          </button>
+        </div>
+      )}
+
+      {/* Expense Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="w-full max-w-md">
+            <ExpenseForm
+              onSubmit={addExpense}
+              onCancel={() => setShowForm(false)}
+              isLoading={isLoading}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Expense List */}
+      <ExpenseList expenses={expenses} />
+
+      {/* Settings/Config (Initially hidden, can be toggled) */}
+      <div className="card mt-8">
+        <div className="text-center text-gray-600">
+          <Smartphone className="w-12 h-12 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">
+            Install this app on your phone for the best experience!
+          </p>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
